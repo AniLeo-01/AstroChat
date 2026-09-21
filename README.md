@@ -86,7 +86,7 @@ RETURN type(r), labels(n)[0], coalesce(n.key, n.name), coalesce(n.value, n.sun_s
 ## Tests
 
 ```bash
-uv run pytest                                                       # 47 tests, a few seconds, no services
+uv run pytest                                                       # 49 tests (48 run, 1 live-Neo4j test skipped), a few seconds, no services
 NEO4J_TEST_URI=bolt://localhost:7687 NEO4J_PASSWORD=password uv run pytest   # + live Neo4j round trip
 ```
 

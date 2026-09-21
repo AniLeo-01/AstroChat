@@ -305,7 +305,6 @@ Statements in the design documents that the code does not currently match, recor
 - TDD §11 sketches an `AstrologyProfile` dataclass; in the code `sun_sign` is a field of `UserProfile`.
 - TDD §7.0 routes a candidate to the Profile node when `category = profile` and its key is in the profile set; `remember` in `app/memory.py` checks only `c.key in PROFILE_KEYS`, so a candidate with key `profile.name` and any category lands on the Profile.
 - TDD Appendix A shows separate indexes on `Memory.category` and `Memory.key`; `SCHEMA` in `app/brain.py` creates one composite index, `memory_lookup`, on `(category, key, status)`.
-- The README's Tests section says "47 tests"; the suite currently collects 49 (48 run, 1 skipped without `NEO4J_TEST_URI`).
 
 ## Documents in this directory
 
