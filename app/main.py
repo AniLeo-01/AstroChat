@@ -2,11 +2,14 @@
 
 import logging
 import os
+import re
 from contextlib import asynccontextmanager
 from datetime import date, datetime
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .brain import BrainUnavailable, InMemoryBrain, Neo4jBrain, SharedBrain
@@ -41,6 +44,19 @@ class UserUpsert(BaseModel):
     time_of_birth: str | None = None
     birth_place: str | None = None
     preferred_language: str | None = None
+
+
+class OnboardRequest(BaseModel):
+    """Lightweight login: name required, email optional. user_id = normalized email or a slug of the name."""
+    name: str = Field(min_length=1, max_length=128)
+    email: str | None = Field(default=None, max_length=254)
+    preferred_language: str | None = Field(default=None, max_length=64)
+
+
+class OnboardResponse(BaseModel):
+    user_id: str
+    name: str
+    email: str | None
 
 
 class ProfileOut(BaseModel):
@@ -115,11 +131,36 @@ def create_app(brain: SharedBrain | None = None, llm: LLMProvider | None = None,
         profile = await request.app.state.brain.upsert_profile(req.user_id, fields)
         return ProfileOut(user_id=req.user_id, **vars(profile))
 
+    @app.get("/users/{user_id}", response_model=ProfileOut)
+    async def get_user(user_id: str, request: Request):
+        profile = await request.app.state.brain.get_profile(user_id)
+        if profile is None:
+            raise HTTPException(404, "user not found")
+        return ProfileOut(user_id=user_id, **vars(profile))
+
+    @app.post("/onboard", response_model=OnboardResponse)
+    async def onboard(req: OnboardRequest, request: Request):
+        name = req.name.strip()
+        email = (req.email or "").strip().lower() or None
+        if email and ("@" not in email or "." not in email):
+            raise HTTPException(422, "email must look like name@example.com")
+        user_id = email or _slugify(name)
+        around = (req.preferred_language or "").strip() or None
+        await request.app.state.brain.onboard_user(user_id, name, email, around)
+        return OnboardResponse(user_id=user_id, name=name, email=email)
+
     @app.get("/users/{user_id}/memories", response_model=list[MemoryOut])
     async def list_memories(user_id: str, request: Request):
         return [MemoryOut(**vars(m)) for m in await request.app.state.brain.list_memories(user_id)]
 
+    app.mount("/", StaticFiles(directory=str(Path(__file__).resolve().parent / "static"), html=True), name="static")
     return app
+
+
+def _slugify(name: str) -> str:
+    """stable user_id from a name: 'Rahul Sharma' -> 'rahul-sharma'"""
+    slug = re.sub(r"[^a-z0-9]+", "-", name.strip().lower()).strip("-")
+    return slug or "user"
 
 
 app = create_app()

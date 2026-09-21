@@ -13,7 +13,7 @@ def validate(candidates: list[MemoryCandidate], min_confidence: float) -> list[M
     kept: list[MemoryCandidate] = []
     for c in candidates:
         c.key, c.category, c.type, c.value = c.key.strip().lower(), c.category.strip().lower(), c.type.strip().lower(), c.value.strip()
-        if c.confidence < min_confidence or not c.key or not c.value:
+        if c.confidence < min_confidence or c.confidence > 1.0 or not c.key or not c.value:
             continue
         if c.category not in MEMORY_CATEGORIES or c.type not in MEMORY_TYPES:
             log.info("dropping off-taxonomy candidate key=%s category=%s type=%s", c.key, c.category, c.type)
@@ -32,8 +32,12 @@ async def remember(brain: SharedBrain, user_id: str, candidates: list[MemoryCand
     changed = 0
     profile_fields = {PROFILE_KEYS[c.key]: c.value for c in valid if c.key in PROFILE_KEYS}
     if profile_fields:
-        await brain.upsert_profile(user_id, profile_fields)
-        changed += len(profile_fields)
+        existing = await brain.get_profile(user_id)
+        existing_fields = existing.fields() if existing else {}
+        new_fields = {k: v for k, v in profile_fields.items() if existing_fields.get(k) != v}
+        if new_fields:
+            await brain.upsert_profile(user_id, profile_fields)
+            changed += len(new_fields)
     for c in valid:
         if c.key not in PROFILE_KEYS and await brain.upsert_memory(user_id, c, source_message_id) != "unchanged":
             changed += 1

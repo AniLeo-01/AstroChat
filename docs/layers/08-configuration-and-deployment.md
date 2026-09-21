@@ -210,7 +210,7 @@ logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(
 
 | Mode | Commands (README "Run it", CLAUDE.md "Commands") | Brain | LLM | What listens where |
 |---|---|---|---|---|
-| Docker Compose | `export ANTHROPIC_API_KEY=sk-ant-...` (or the openai trio, or `LLM_PROVIDER=mock`), then `docker compose up --build` | `Neo4jBrain` -> `bolt://neo4j:7687` (compose service DNS) | from `${LLM_PROVIDER:-anthropic}` and the passthrough variables | app `localhost:8000` (Swagger at `/docs`), Neo4j Browser `localhost:7474`, bolt `localhost:7687`, all published to the host |
+| Docker Compose | `export ANTHROPIC_API_KEY=sk-ant-...` (or the openai trio, or `LLM_PROVIDER=mock`), then `docker compose up --build` | `Neo4jBrain` -> `${NEO4J_URI:-bolt://neo4j:7687}` (default: compose service DNS; any `NEO4J_URI`/`NEO4J_USER`/`NEO4J_PASSWORD` in `.env` wins) | from `${LLM_PROVIDER:-anthropic}` and the passthrough variables | app `localhost:8000` (Swagger at `/docs`), Neo4j Browser `localhost:7474`, bolt `localhost:7687`, all published to the host |
 | Local with Neo4j | `docker run -d --name neo4j -p 7687:7687 -p 7474:7474 -e NEO4J_AUTH=neo4j/password neo4j:5`; `cp .env.example .env`; `uv sync`; `uv run --env-file .env uvicorn app.main:app --reload` | `Neo4jBrain` -> `bolt://localhost:7687` | per `.env` | uvicorn default `127.0.0.1:8000`; Neo4j on the host ports |
 | No services | `BRAIN=memory LLM_PROVIDER=mock uv run uvicorn app.main:app --reload` | `InMemoryBrain` | `MockLLM` | `127.0.0.1:8000` only |
 
@@ -262,12 +262,12 @@ Absent by design, or not yet present: no `HEALTHCHECK` (the app has no health en
 |---|---|---|
 | `build` | `.` | The `Dockerfile` above |
 | `ports` | `8000:8000` | API on the host's 8000 |
-| `environment.NEO4J_URI` | `bolt://neo4j:7687` | The compose service name resolves on the compose network; `localhost` inside the app container would be the app container itself |
-| `NEO4J_USER`, `NEO4J_PASSWORD` | `neo4j`, `password` | Literal, matching `NEO4J_AUTH` |
+| `environment.NEO4J_URI` | `${NEO4J_URI:-bolt://neo4j:7687}` | The default is the compose service name, which resolves on the compose network (`localhost` inside the app container would be the app container itself). A `NEO4J_URI`/`NEO4J_USER`/`NEO4J_PASSWORD` from `.env` (or the shell) overrides it, e.g. to point the app at an external Neo4j Aura instance |
+| `NEO4J_USER`, `NEO4J_PASSWORD` | `${NEO4J_USER:-neo4j}`, `${NEO4J_PASSWORD:-password}` | Defaults match the bundled service's `NEO4J_AUTH: neo4j/password`; `.env` overrides for an external database |
 | `LLM_PROVIDER`, `LLM_MODEL`, `LLM_EFFORT`, `ANTHROPIC_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_API_KEY` | `${VAR:-default}` | Passed through from the shell that runs `docker compose` (or a project `.env`), with defaults `anthropic`, empty, `medium`, empty, empty, empty, which mirror the `Settings` defaults. The comment on `OPENAI_BASE_URL`: "For a server on the Docker host (e.g. Ollama) use http://host.docker.internal:11434/v1", because `localhost:11434` inside the container is not the host |
 | `depends_on.neo4j.condition` | `service_healthy` | The app container starts only after the healthcheck passes, so `ensure_schema` at startup normally succeeds and the constraints and index exist from the first request |
 
-Not passed through by compose: `BRAIN` (so compose always runs `Neo4jBrain`), `RECENT_LIMIT`, `MEMORY_LIMIT`, `MIN_CONFIDENCE`, `LOG_LEVEL`. Inside the container these take the code defaults; changing them for a compose run means editing `docker-compose.yml`.
+`env_file: .env` (added for the app service) passes every variable in the project `.env` into the container, including `BRAIN`, `RECENT_LIMIT`, `MEMORY_LIMIT`, `MIN_CONFIDENCE` and `LOG_LEVEL`; the `environment:` block then overrides those that it lists, so `BRAIN=memory` in `.env` makes a compose run use the in-memory brain, and the budgets follow `.env` too. Without a `.env` present, the `environment:` block supplies the Neo4j and LLM values and the rest take the code defaults.
 
 `depends_on` governs startup only; nothing supervises the pair afterwards. If Neo4j stops later, the app keeps serving with `degraded: true` (TDD §13.2, README "Failure modes") until the driver reconnects.
 
@@ -376,9 +376,9 @@ Compact form of the tables above, including the variables outside `Settings`.
 | Variable | Default | Read by | Passed through by compose | Meaning |
 |---|---|---|---|---|
 | `BRAIN` | `neo4j` | `Settings.brain` | no | exactly `memory` selects `InMemoryBrain`; anything else `Neo4jBrain` |
-| `NEO4J_URI` | `bolt://localhost:7687` | `Settings.neo4j_uri` | fixed to `bolt://neo4j:7687` | driver URI |
-| `NEO4J_USER` | `neo4j` | `Settings.neo4j_user` | fixed to `neo4j` | driver auth |
-| `NEO4J_PASSWORD` | `password` | `Settings.neo4j_password` | fixed to `password` | driver auth |
+| `NEO4J_URI` | `bolt://localhost:7687` | `Settings.neo4j_uri` | `${NEO4J_URI:-bolt://neo4j:7687}` | driver URI |
+| `NEO4J_USER` | `neo4j` | `Settings.neo4j_user` | `${NEO4J_USER:-neo4j}` | driver auth |
+| `NEO4J_PASSWORD` | `password` | `Settings.neo4j_password` | `${NEO4J_PASSWORD:-password}` | driver auth |
 | `LLM_PROVIDER` | `anthropic` | `Settings.llm_provider` | `${LLM_PROVIDER:-anthropic}` | `anthropic`, `openai` or `mock` |
 | `LLM_MODEL` | empty | `Settings.llm_model` | `${LLM_MODEL:-}` | required for `openai`; anthropic falls back to `claude-opus-5`; ignored by `mock` |
 | `LLM_EFFORT` | `medium` | `Settings.llm_effort` | `${LLM_EFFORT:-medium}` | anthropic `output_config.effort` (always sent on generation, never on extraction); openai `reasoning_effort` (omitted when empty) |

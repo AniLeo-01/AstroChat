@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import date
 
 from .brain import BrainUnavailable, SharedBrain
-from .context import classify, select_context
+from .context import select_context
 from .llm import LLMError, LLMProvider
 from .memory import remember
 from .models import Category, ChatMessage
@@ -31,7 +31,7 @@ class ChatService:
 
     async def chat(self, user_id: str, session_id: str, message: str) -> ChatResult:
         recent = self.sessions.recent(user_id, session_id)
-        category = classify(message)
+        category = await self.llm.classify(message)
 
         # Retrieve: follow-ups rely on recent turns only; everything else consults the Shared Brain.
         profile, memories, degraded = None, [], False

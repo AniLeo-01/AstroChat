@@ -28,6 +28,8 @@ class BrainUnavailable(Exception):
 class SharedBrain(Protocol):
     async def get_profile(self, user_id: str) -> UserProfile | None: ...
     async def upsert_profile(self, user_id: str, fields: dict[str, str]) -> UserProfile: ...
+    async def onboard_user(self, user_id: str, name: str, email: str | None,
+                           preferred_language: str | None) -> UserProfile: ...
     async def search_memories(self, user_id: str, category: str | None, limit: int) -> list[Memory]: ...
     async def upsert_memory(self, user_id: str, cand: MemoryCandidate, source_message_id: str) -> Outcome: ...
     async def list_memories(self, user_id: str) -> list[Memory]: ...
@@ -42,6 +44,9 @@ def _with_sun_sign(fields: dict[str, str]) -> dict[str, str]:
     dob = parse_date(fields["date_of_birth"]) if fields.get("date_of_birth") else None
     if dob:
         fields = {**fields, "date_of_birth": dob.isoformat(), "sun_sign": sun_sign(dob)}
+    elif fields.get("date_of_birth") and "sun_sign" not in fields:
+        # If DOB was set but unparseable, keep it but clear stale sun_sign
+        fields = {**fields, "sun_sign": None}
     return fields
 
 
@@ -77,6 +82,14 @@ class InMemoryBrain:
             setattr(profile, k, v)
         return profile
 
+    async def onboard_user(self, user_id: str, name: str, email: str | None,
+                           preferred_language: str | None) -> UserProfile:
+        self._check()
+        fields = {"name": name}
+        if preferred_language:
+            fields["preferred_language"] = preferred_language
+        return await self.upsert_profile(user_id, fields)
+
     async def search_memories(self, user_id: str, category: str | None, limit: int) -> list[Memory]:
         self._check()
         rows = [m for m in self._memories[user_id] if m.status == "ACTIVE" and (category is None or m.category == category)]
@@ -99,33 +112,65 @@ class InMemoryBrain:
         self._check()
         return list(self._memories[user_id])
 
-
+# CYPHER QUERIES
+# Community Edition has no multiple databases or partial (filtered) unique constraints, so each user is
+# a partition: Memory and Profile nodes carry the owning user_id. "At most one ACTIVE memory per key" is
+# DB-enforced via a derived single property `active_key` = "user_id|category|key" that is non-null only
+# while ACTIVE; Neo4j does not index nulls, so any number of SUPERSEDED versions can coexist while the
+# unique constraint still rejects a second ACTIVE for the same key.
 SCHEMA = (
+    # migration: the old composite (user_id, category, key, status) constraint cannot allow a second
+    # SUPERSEDED version of a key, so drop it in favour of the derived active_key constraint below.
+    "DROP CONSTRAINT memory_partition_unique IF EXISTS",
     "CREATE CONSTRAINT user_id_unique IF NOT EXISTS FOR (u:User) REQUIRE u.id IS UNIQUE",
+    "CREATE CONSTRAINT user_email_unique IF NOT EXISTS FOR (u:User) REQUIRE u.email IS UNIQUE",
     "CREATE CONSTRAINT memory_id_unique IF NOT EXISTS FOR (m:Memory) REQUIRE m.id IS UNIQUE",
-    "CREATE INDEX memory_lookup IF NOT EXISTS FOR (m:Memory) ON (m.category, m.key, m.status)",
+    "CREATE CONSTRAINT memory_active_unique IF NOT EXISTS FOR (m:Memory) REQUIRE m.active_key IS UNIQUE",
+    "CREATE CONSTRAINT profile_user_unique IF NOT EXISTS FOR (p:Profile) REQUIRE p.user_id IS UNIQUE",
 )
-GET_PROFILE = "MATCH (:User {id: $user_id})-[:HAS_PROFILE]->(p:Profile) RETURN p"
+# One-time idempotent backfill: legacy nodes created before the partition key get it from their User,
+# and pre-existing memory nodes get their derived active_key (ACTIVE only) before the constraint exists.
+BACKFILL = """
+MATCH (u:User)-[:HAS_PROFILE]->(p:Profile) WHERE p.user_id IS NULL SET p.user_id = u.id
+WITH u
+MATCH (u)-[:HAS_MEMORY]->(m:Memory) WHERE m.user_id IS NULL SET m.user_id = u.id"""
+BACKFILL_ACTIVE_KEY = """
+MATCH (m:Memory) WHERE m.active_key IS NULL
+SET m.active_key = CASE WHEN m.status = 'ACTIVE'
+                        THEN m.user_id + '|' + m.category + '|' + m.key ELSE NULL END"""
+GET_PROFILE = "MATCH (p:Profile {user_id: $user_id}) RETURN p"
+ONBOARD_USER = """
+MERGE (u:User {id: $user_id}) ON CREATE SET u.created_at = datetime(), u.email = $email
+ON MATCH SET u.updated_at = datetime()
+MERGE (u)-[:HAS_PROFILE]->(p:Profile)
+SET p.name = $name
+SET p.preferred_language = coalesce($preferred_language, p.preferred_language)
+SET p.user_id = $user_id
+RETURN p"""
 UPSERT_PROFILE = """
 MERGE (u:User {id: $user_id}) ON CREATE SET u.created_at = datetime()
 SET u.updated_at = datetime()
 MERGE (u)-[:HAS_PROFILE]->(p:Profile)
+SET p.user_id = $user_id
 SET p += $fields
 RETURN p"""
 SEARCH_MEMORIES = """
-MATCH (:User {id: $user_id})-[:HAS_MEMORY]->(m:Memory)
+MATCH (m:Memory {user_id: $user_id})
 WHERE m.status = 'ACTIVE' AND ($category IS NULL OR m.category = $category)
 RETURN m ORDER BY m.confidence DESC, m.updated_at DESC LIMIT $limit"""
-LIST_MEMORIES = "MATCH (:User {id: $user_id})-[:HAS_MEMORY]->(m:Memory) RETURN m ORDER BY m.created_at"
+LIST_MEMORIES = "MATCH (m:Memory {user_id: $user_id}) RETURN m ORDER BY m.created_at"
 FIND_ACTIVE = """
-MATCH (:User {id: $user_id})-[:HAS_MEMORY]->(m:Memory {category: $category, key: $key, status: 'ACTIVE'})
+MATCH (m:Memory {user_id: $user_id, category: $category, key: $key, status: 'ACTIVE'})
 RETURN m.id AS id, m.value AS value, m.confidence AS confidence"""
 TOUCH = "MATCH (m:Memory {id: $id}) SET m.updated_at = datetime(), m.confidence = $confidence"
-SUPERSEDE = "MATCH (m:Memory {id: $id}) SET m.status = 'SUPERSEDED', m.updated_at = datetime()"
+SUPERSEDE = ("MATCH (m:Memory {id: $id}) SET m.status = 'SUPERSEDED', m.updated_at = datetime(),"
+             " m.active_key = null")
 CREATE_MEMORY = """
 MERGE (u:User {id: $user_id}) ON CREATE SET u.created_at = datetime()
 CREATE (u)-[:HAS_MEMORY]->(m:Memory $props)
-SET m.created_at = datetime(), m.updated_at = datetime()
+SET m.created_at = datetime(), m.updated_at = datetime(), m.user_id = $user_id
+SET m.active_key = CASE WHEN m.status = 'ACTIVE'
+                        THEN m.user_id + '|' + m.category + '|' + m.key ELSE NULL END
 WITH m
 OPTIONAL MATCH (old:Memory {id: $old_id})
 FOREACH (o IN CASE WHEN old IS NULL THEN [] ELSE [old] END | CREATE (m)-[:SUPERSEDES]->(o))"""
@@ -153,6 +198,8 @@ class Neo4jBrain:
             notifications_min_severity="OFF")  # server hints about empty labels are noise on a fresh graph
 
     async def ensure_schema(self) -> None:
+        await self._query(BACKFILL)
+        await self._query(BACKFILL_ACTIVE_KEY)
         for stmt in SCHEMA:
             await self._query(stmt)
 
@@ -165,6 +212,12 @@ class Neo4jBrain:
 
     async def upsert_profile(self, user_id: str, fields: dict[str, str]) -> UserProfile:
         rows = await self._query(UPSERT_PROFILE, user_id=user_id, fields=_with_sun_sign(fields))
+        return _profile(rows[0]["p"])
+
+    async def onboard_user(self, user_id: str, name: str, email: str | None,
+                           preferred_language: str | None) -> UserProfile:
+        rows = await self._query(ONBOARD_USER, user_id=user_id, email=email,
+                                 name=name, preferred_language=preferred_language)
         return _profile(rows[0]["p"])
 
     async def search_memories(self, user_id: str, category: str | None, limit: int) -> list[Memory]:

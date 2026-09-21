@@ -30,6 +30,8 @@ docker compose up --build
 # API http://localhost:8000  (Swagger at /docs)   Neo4j Browser http://localhost:7474  (neo4j / password)
 ```
 
+The app connects to the bundled Neo4j service by default (`bolt://neo4j:7687`). To use an external graph, set `NEO4J_URI` / `NEO4J_USER` / `NEO4J_PASSWORD` in `.env` — they win over the bundled default. The bundled `neo4j` container uses its own `NEO4J_AUTH` defaults (neo4j/password).
+
 **Locally**:
 
 ```bash
@@ -86,7 +88,7 @@ RETURN type(r), labels(n)[0], coalesce(n.key, n.name), coalesce(n.value, n.sun_s
 ## Tests
 
 ```bash
-uv run pytest                                                       # 49 tests (48 run, 1 live-Neo4j test skipped), a few seconds, no services
+uv run pytest                                                       # 56 tests (55 run, 1 live-Neo4j test skipped), a few seconds, no services
 NEO4J_TEST_URI=bolt://localhost:7687 NEO4J_PASSWORD=password uv run pytest   # + live Neo4j round trip
 ```
 
@@ -122,7 +124,9 @@ Each scenario asserts the expected `context_used` and the expected facts in the 
  "memory_updates": 0, "degraded": false}
 ```
 
-`POST /users` upserts profile fields (`name`, `date_of_birth`, `time_of_birth`, `birth_place`, `preferred_language`); `sun_sign` is derived. `GET /users/{user_id}/memories` lists every memory including superseded ones, for inspection.
+`POST /users` upserts profile fields (`name`, `date_of_birth`, `time_of_birth`, `birth_place`, `preferred_language`); `sun_sign` is derived. `GET /users/{user_id}` returns the profile for a user (`404` if never seen). `GET /users/{user_id}/memories` lists every memory including superseded ones, for inspection.
+
+`POST /onboard` is the lightweight login the UI uses: send `{name, email?, preferred_language?}`, get back a stable `user_id` (the normalized email if given, otherwise a slug of the name) plus the stored display name. It creates the User and Profile nodes. No passwords — full auth is deliberately deferred.
 
 Errors: `422` invalid payload, `503` when the LLM is unavailable (nothing is recorded for that turn). A Neo4j outage does not fail `/chat`; the response carries `degraded: true`.
 
@@ -130,9 +134,9 @@ Errors: `422` invalid payload, `503` when the LLM is unavailable (nothing is rec
 
 ```
 app/
-  main.py      FastAPI factory, schemas, 3 routes, 2 exception handlers      (no Neo4j or LLM calls)
+  main.py      FastAPI factory, schemas, 5 routes, 2 exception handlers        (no Neo4j or LLM calls)
   chat.py      ChatService: the orchestration sequence                        (no Cypher, no SDK)
-  context.py   classify() -> select_context() -> LLMRequest + context_used
+  context.py   select_context() -> LLMRequest + context_used; classify() = rule reference for the mock
   brain.py     SharedBrain protocol; InMemoryBrain (tests/demo); Neo4jBrain + all Cypher
   memory.py    validate candidates, route profile facts, upsert the rest
   llm.py       LLMProvider protocol; AnthropicLLM; OpenAICompatibleLLM; MockLLM; build_llm()  (only module importing provider SDKs)
@@ -142,19 +146,22 @@ app/
   config.py    Settings from environment
 ```
 
-Request sequence: load recent turns → classify query → (unless follow-up) read profile + category-filtered memories → build bounded prompt → generate → append both turns to the session → (unless follow-up or degraded) extract candidates from the **user's** message → validate → upsert.
+Request sequence: load recent turns → **LLM-route the query** (see below) → (unless follow-up) read profile + category-filtered memories → build bounded prompt → generate → append both turns to the session → (unless follow-up or degraded) extract candidates from the **user's** message → validate → upsert.
 
 ## Graph schema
 
 ```
-(:User {id, created_at, updated_at})
-  -[:HAS_PROFILE]-> (:Profile {name, date_of_birth, time_of_birth, birth_place, preferred_language, sun_sign})
-  -[:HAS_MEMORY]->  (:Memory {id, key, category, type, value, target_timeframe, confidence,
+(:User {id, email, created_at, updated_at})
+  -[:HAS_PROFILE]-> (:Profile {user_id, name, date_of_birth, time_of_birth, birth_place, preferred_language, sun_sign})
+  -[:HAS_MEMORY]->  (:Memory {user_id, id, key, category, type, value, target_timeframe, confidence,
                               status: ACTIVE|SUPERSEDED, source_message_id, created_at, updated_at})
 (:Memory)-[:SUPERSEDES]->(:Memory)
 ```
 
-Constraints: `User.id` and `Memory.id` unique. Index: `Memory(category, key, status)` for the logical-key lookup. Goals, preferences and interests are `Memory.type` values rather than typed nodes; adding typed nodes later is additive.
+Community Edition has no multiple databases, so each user is a **graph partition**: `Profile.user_id` and `Memory.user_id` are the owning user, and every query selects on `$user_id`. Partitioning is enforced by the database itself:
+
+- Constraints: `User.id`, `User.email`, `Memory.id` unique; `Memory.active_key` unique — a derived `"user_id|category|key"` property set only while ACTIVE (the old composite `Memory(user_id, category, key, status)` constraint rejected a second SUPERSEDED version of a key and is dropped by `ensure_schema`). So at most one `ACTIVE` memory per user+key — repeated facts must supersede, never coexist — while any number of `SUPERSEDED` versions may chain. `Profile.user_id` unique (one profile per user). `ensure_schema` backfills `user_id` + `active_key` onto legacy nodes on startup.
+- Goals, preferences and interests are `Memory.type` values rather than typed nodes; adding typed nodes later is additive.
 
 ## Memory strategy
 
@@ -167,7 +174,7 @@ Constraints: `User.id` and `Memory.id` unique. Index: `Memory(category, key, sta
 
 ## Context selection
 
-1. **Classify** the message with a first-match keyword classifier into `profile | career | relationships | finance | health | interests | language | astrology | general | follow_up`. Follow-up detection: leading phrases ("why", "tell me more", "what about that") or a short message with a bare pronoun. Ambiguous → `general`.
+1. **Route the query** with a small structured-output LLM call into `profile | career | relationships | finance | health | interests | language | astrology | general | follow_up` (prompt: `llm.CLASSIFY_SYSTEM`). Follow-ups ("why", "tell me more", a bare "that"/"it") retrieve nothing and skip extraction. The deterministic keyword classifier that the MVP once used still exists as `context.classify()` but only as the mock's spec — `MockLLM.classify` delegates to it so offline tests pin the pipeline without a real model.
 2. **Retrieve** active memories where `category = $category` (all categories for `general`), ordered by confidence then recency, `LIMIT 8`. Follow-ups skip the graph entirely.
 3. **Select profile fields** by category: everything for `profile`/`astrology`; name + preferred language for `language`; name + sun sign for life areas and `general`; nothing for `follow_up`. Sun sign rides along on life-area questions because it is the personalization hook of an astrology assistant.
 4. **Build** one system prompt (fixed rules + rendered context) and a message list (≤10 recent turns + current message).
@@ -193,6 +200,7 @@ Constraints: `User.id` and `Memory.id` unique. Index: `Memory(category, key, sta
 | `NEO4J_URI` / `NEO4J_USER` / `NEO4J_PASSWORD` | `bolt://localhost:7687` / `neo4j` / `password` | Graph connection |
 | `LLM_PROVIDER` | `anthropic` | `anthropic`, `openai` or `mock` |
 | `LLM_MODEL` | unset | Required for `openai` (server-specific); `anthropic` falls back to `claude-opus-5` |
+| `LLM_CLASSIFY_MODEL` | unset | Cheaper model for the query router (e.g. `claude-haiku-4-5`); empty = use `LLM_MODEL` everywhere |
 | `LLM_EFFORT` | `medium` | `low` / `medium` / `high`. Anthropic `effort`, OpenAI-compatible `reasoning_effort`; empty omits the parameter |
 | `ANTHROPIC_API_KEY` | unset | Anthropic provider |
 | `OPENAI_BASE_URL` / `OPENAI_API_KEY` | unset | OpenAI-compatible provider; empty URL means api.openai.com, key may be empty for local servers |
@@ -205,7 +213,7 @@ Constraints: `User.id` and `Memory.id` unique. Index: `Memory(category, key, sta
 |---|---|---|
 | Graph DB | Neo4j, generic `Memory` nodes | Required by the assignment; typed nodes add nothing until a traversal needs them |
 | Session history | In-process deque | Fast; the store is one class with two methods, so Redis is a drop-in |
-| Query classification | Keywords, deterministic | Zero extra LLM calls; misroutes fall to `general`, which still retrieves everything |
+| Query classification | LLM router on a configured, cheaper model (`LLM_CLASSIFY_MODEL`, defaults to the main model) | One extra cheap round-trip per turn; routing is semantic, so phrasing keywords miss ("how's my 401k?", "mere pyaar ke baare mein") still retrieves the right category |
 | Ranking | Cypher filter + order (confidence, recency) | Explainable; a weighted score has no semantic signal to weigh without embeddings |
 | Extraction | Structured LLM output + deterministic validation | Flexible extraction, hard guardrails on what is persisted |
 | Correction | Supersede, never overwrite | Provenance and history for free |

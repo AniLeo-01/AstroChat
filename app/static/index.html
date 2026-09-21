@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AstroChat</title>
+<style>
+:root {
+  --bg: #0f0e17;
+  --surface: #1a1932;
+  --surface2: #232242;
+  --accent: #ff8906;
+  --accent2: #f25f4c;
+  --text: #fffffe;
+  --text2: #a7a9be;
+  --border: #2e2c54;
+  --green: #2cb67d;
+  --red: #e53170;
+  --radius: 12px;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+header h1 {
+  font-size: 18px;
+  font-weight: 700;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+header .badge {
+  font-size: 11px;
+  background: var(--surface2);
+  color: var(--text2);
+  padding: 2px 8px;
+  border-radius: 20px;
+}
+.greeting {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--text2);
+}
+.greeting .who { color: var(--text); font-weight: 600; }
+.greeting button {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text2);
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.greeting button:hover { color: var(--red); border-color: var(--red); }
+.tabs {
+  display: flex;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.tab {
+  padding: 10px 20px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text2);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all .15s;
+  background: none;
+  border-top: none;
+  border-left: none;
+  border-right: none;
+}
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.tab-content { display: none; flex: 1; overflow: hidden; }
+.tab-content.active { display: flex; flex-direction: column; }
+.hidden { display: none !important; }
+
+/* login */
+#login-view {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.login-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 32px;
+  max-width: 380px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.login-card h2 {
+  font-size: 20px;
+  text-align: center;
+}
+.login-card p {
+  font-size: 13px;
+  color: var(--text2);
+  text-align: center;
+  line-height: 1.5;
+}
+.login-card .field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.login-card label {
+  font-size: 12px;
+  color: var(--text2);
+  font-weight: 600;
+}
+.login-card input {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 14px;
+}
+.login-card input:focus { outline: none; border-color: var(--accent); }
+.login-card button {
+  background: var(--accent);
+  color: #000;
+  border: none;
+  padding: 12px;
+  border-radius: var(--radius);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.login-card button:disabled { opacity: .5; cursor: not-allowed; }
+.login-error {
+  font-size: 13px;
+  color: var(--red);
+  text-align: center;
+  min-height: 16px;
+}
+
+/* chat */
+.chat-area {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.message {
+  max-width: 75%;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  font-size: 14px;
+  line-height: 1.5;
+  animation: fadeIn .2s ease;
+}
+@keyframes fadeIn { from { opacity:0; transform: translateY(6px); } to { opacity:1; transform: translateY(0); } }
+.message.user {
+  align-self: flex-end;
+  background: var(--accent);
+  color: #000;
+  border-bottom-right-radius: 4px;
+}
+.message.assistant {
+  align-self: flex-start;
+  background: var(--surface2);
+  border-bottom-left-radius: 4px;
+}
+.message .meta {
+  font-size: 11px;
+  margin-top: 6px;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.badge-tag {
+  display: inline-block;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: rgba(255,255,255,.1);
+  color: var(--text2);
+}
+.badge-tag.degraded { background: var(--red); color: #fff; }
+.badge-tag.memories { background: var(--green); color: #fff; }
+.empty-state {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text2);
+  font-size: 14px;
+  text-align: center;
+  padding: 40px;
+}
+.chat-input-area {
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.chat-input-area input {
+  flex: 1;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  font-size: 14px;
+}
+.chat-input-area input:focus { outline: none; border-color: var(--accent); }
+.chat-input-area button, .profile-form button {
+  background: var(--accent);
+  color: #000;
+  border: none;
+  padding: 10px 18px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.chat-input-area button:hover, .profile-form button:hover { background: var(--accent2); }
+.chat-input-area button:disabled, .profile-form button:disabled { opacity: .5; cursor: not-allowed; }
+.panel {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+}
+
+/* profile form */
+.profile-form {
+  max-width: 480px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.profile-form h2 {
+  text-align: center;
+  margin-bottom: 10px;
+  font-size: 16px;
+}
+.profile-form .field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.profile-form label {
+  font-size: 12px;
+  color: var(--text2);
+  font-weight: 600;
+}
+.profile-form input {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 14px;
+}
+.profile-form input:focus { outline: none; border-color: var(--accent); }
+.profile-form input:disabled { opacity: .6; }
+.form-msg {
+  font-size: 13px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  text-align: center;
+}
+.form-msg.ok { background: rgba(44,182,125,.15); color: var(--green); }
+.form-msg.err { background: rgba(229,49,112,.15); color: var(--red); }
+.identity-note {
+  font-size: 12px;
+  color: var(--text2);
+  text-align: center;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  padding: 8px 12px;
+  border-radius: 8px;
+}
+
+/* stored data */
+.stored-wrap {
+  max-width: 640px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.section-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text2);
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  margin-bottom: 8px;
+}
+.profile-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  font-size: 13px;
+  display: grid;
+  grid-template-columns: 3fr 3fr 2fr;
+  gap: 8px 12px;
+}
+.profile-card .cell { display: flex; flex-direction: column; gap: 2px; }
+.profile-card .cell .k {
+  font-size: 10px;
+  color: var(--text2);
+  text-transform: uppercase;
+  letter-spacing: .5px;
+}
+.profile-card .cell .v { font-weight: 600; }
+.profile-card .cell .v.missing { color: var(--text2); font-weight: 400; }
+.profile-card .cell.wide { grid-column: span 3; }
+.sun-sign {
+  grid-column: span 3;
+  margin-top: 4px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(255,137,6,.12);
+  color: var(--accent);
+  font-weight: 700;
+  text-align: center;
+}
+.memory-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  font-size: 13px;
+}
+.memory-card .key {
+  font-weight: 700;
+  color: var(--accent);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+}
+.memory-card .value { margin: 4px 0; font-size: 14px; }
+.memory-card .sub {
+  font-size: 11px;
+  color: var(--text2);
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+.status-active { color: var(--green); }
+.status-superseded { color: var(--red); }
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255,255,255,.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin .6s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (max-width: 600px) {
+  .message { max-width: 90%; }
+  .profile-card { grid-template-columns: 1fr 1fr; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>✦ AstroChat</h1>
+  <span class="badge">v0.1</span>
+  <div class="greeting hidden" id="greeting">
+    <span class="who" id="greeting-who"></span>
+    <button id="logout" type="button">Log out</button>
+  </div>
+</header>
+
+<div id="login-view">
+  <form class="login-card" id="login-form">
+    <h2>Welcome to AstroChat</h2>
+    <p>Tell us who you are. No password — your name (or email) is your identity.</p>
+    <div class="field"><label>Name</label><input id="login-name" placeholder="Rahul" maxlength="128" autocomplete="name" required></div>
+    <div class="field"><label>Email (optional)</label><input id="login-email" type="email" placeholder="rahul@example.com" maxlength="254" autocomplete="email"></div>
+    <div class="field"><label>Preferred Language (optional)</label><input id="login-lang" placeholder="English" maxlength="64"></div>
+    <button id="login-submit">Start chatting</button>
+    <div class="login-error" id="login-error"></div>
+  </form>
+</div>
+
+<div id="app-view" class="hidden">
+  <div class="tabs">
+    <button class="tab active" data-tab="chat">Chat</button>
+    <button class="tab" data-tab="profile">Profile</button>
+    <button class="tab" data-tab="stored">Stored data</button>
+  </div>
+
+  <div class="tab-content active" id="tab-chat">
+    <div class="chat-area" id="chat-area">
+      <div class="empty-state">Start a conversation — ask about your stars, career, or anything else.</div>
+    </div>
+    <div class="chat-input-area">
+      <input id="chat-input" placeholder="What do you want to know?" autocomplete="off">
+      <button id="chat-send">Send</button>
+    </div>
+  </div>
+
+  <div class="tab-content" id="tab-profile">
+    <div class="panel">
+      <form class="profile-form" id="profile-form">
+        <h2>Your Profile</h2>
+        <div class="field"><label>Name</label><input id="p-name" placeholder="Rahul"></div>
+        <div class="field"><label>Email / ID</label><input id="p-email" disabled></div>
+        <div class="field"><label>Date of Birth</label><input id="p-dob" type="date"></div>
+        <div class="field"><label>Time of Birth</label><input id="p-tob" placeholder="06:30"></div>
+        <div class="field"><label>Birth Place</label><input id="p-bp" placeholder="Delhi"></div>
+        <div class="field"><label>Preferred Language</label><input id="p-lang" placeholder="English"></div>
+        <button type="submit">Save Profile</button>
+        <div id="profile-msg"></div>
+      </form>
+    </div>
+  </div>
+
+  <div class="tab-content" id="tab-stored">
+    <div class="panel">
+      <div class="stored-wrap" id="stored-content">
+        <div class="empty-state"><span class="spinner"></span> Loading…</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const IDENTITY_KEY = 'astrochat.identity';
+const SESSION_KEY = 'astrochat.session';
+let identity = JSON.parse(localStorage.getItem(IDENTITY_KEY) || 'null');
+let sessionId = sessionStorage.getItem(SESSION_KEY) || crypto.randomUUID();
+sessionStorage.setItem(SESSION_KEY, sessionId);
+
+const loginView = document.getElementById('login-view');
+const appView = document.getElementById('app-view');
+const greeting = document.getElementById('greeting');
+const greetingWho = document.getElementById('greeting-who');
+const profileForm = document.getElementById('profile-form');
+const storedContent = document.getElementById('stored-content');
+const chatArea = document.getElementById('chat-area');
+const chatInput = document.getElementById('chat-input');
+const chatSend = document.getElementById('chat-send');
+
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g,
+  c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+
+function showApp() {
+  loginView.classList.add('hidden');
+  appView.classList.remove('hidden');
+  greeting.classList.remove('hidden');
+  greetingWho.textContent = identity.name + (identity.email ? ' <' + identity.email + '>' : '');
+}
+
+if (identity) showApp();
+
+// Logout
+document.getElementById('logout').addEventListener('click', () => {
+  localStorage.removeItem(IDENTITY_KEY);
+  sessionStorage.removeItem(SESSION_KEY);
+  location.reload();
+});
+
+// Login
+document.getElementById('login-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const submit = document.getElementById('login-submit');
+  const err = document.getElementById('login-error');
+  err.textContent = '';
+  submit.disabled = true;
+  try {
+    const res = await fetch('/onboard', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: document.getElementById('login-name').value.trim(),
+        email: document.getElementById('login-email').value.trim() || null,
+        preferred_language: document.getElementById('login-lang').value.trim() || null,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      err.textContent = data.detail || res.statusText;
+      return;
+    }
+    identity = { user_id: data.user_id, name: data.name, email: data.email };
+    localStorage.setItem(IDENTITY_KEY, JSON.stringify(identity));
+    showApp();
+  } catch (ex) {
+    err.textContent = 'Network error: ' + ex.message;
+  } finally {
+    submit.disabled = false;
+  }
+});
+
+// Tabs
+const tabs = document.querySelectorAll('.tab');
+tabs.forEach(tab => {
+  tab.addEventListener('click', () => {
+    tabs.forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(tc => tc.classList.remove('active'));
+    tab.classList.add('active');
+    const name = tab.dataset.tab;
+    document.getElementById('tab-' + name).classList.add('active');
+    if (name === 'profile') loadProfile();
+    if (name === 'stored') loadStored();
+  });
+});
+
+// Chat
+function appendMessage(text, isUser, meta) {
+  const empty = chatArea.querySelector('.empty-state');
+  if (empty) empty.remove();
+  const div = document.createElement('div');
+  div.className = 'message ' + (isUser ? 'user' : 'assistant');
+  let html = esc(text);
+  if (meta) {
+    html += '<div class="meta">';
+    if (meta.context_used && meta.context_used.length) {
+      html += '<span class="badge-tag">ctx: ' + meta.context_used.map(esc).join(', ') + '</span>';
+    }
+    if (meta.memory_updates > 0) {
+      html += '<span class="badge-tag memories">+' + meta.memory_updates + ' memory</span>';
+    }
+    if (meta.degraded) {
+      html += '<span class="badge-tag degraded">degraded</span>';
+    }
+    html += '</div>';
+  }
+  div.innerHTML = html;
+  chatArea.appendChild(div);
+  chatArea.scrollTop = chatArea.scrollHeight;
+}
+
+async function sendChat() {
+  const msg = chatInput.value.trim();
+  if (!msg) return;
+  appendMessage(msg, true);
+  chatInput.value = '';
+  chatSend.disabled = true;
+  try {
+    const res = await fetch('/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: identity.user_id, session_id: sessionId, message: msg }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      appendMessage('Error: ' + (data.detail || res.statusText), false);
+    } else {
+      const data = await res.json();
+      appendMessage(data.response, false, {
+        context_used: data.context_used,
+        memory_updates: data.memory_updates,
+        degraded: data.degraded,
+      });
+    }
+  } catch (e) {
+    appendMessage('Network error: ' + e.message, false);
+  }
+  chatSend.disabled = false;
+}
+
+chatSend.addEventListener('click', sendChat);
+chatInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendChat(); });
+
+// Profile
+async function loadProfile() {
+  const msg = document.getElementById('profile-msg');
+  msg.className = '';
+  msg.textContent = '';
+  document.getElementById('p-email').value = identity.email || identity.user_id;
+  try {
+    const res = await fetch('/users/' + encodeURIComponent(identity.user_id));
+    if (!res.ok) return; // never seen yet -> keep form blank
+    const p = await res.json();
+    document.getElementById('p-name').value = p.name || '';
+    if (/^\d{4}-\d{2}-\d{2}$/.test(p.date_of_birth || '')) document.getElementById('p-dob').value = p.date_of_birth;
+    document.getElementById('p-tob').value = p.time_of_birth || '';
+    document.getElementById('p-bp').value = p.birth_place || '';
+    document.getElementById('p-lang').value = p.preferred_language || '';
+  } catch (e) { /* keep blank */ }
+}
+
+profileForm.addEventListener('submit', async e => {
+  e.preventDefault();
+  const msg = document.getElementById('profile-msg');
+  msg.className = '';
+  msg.textContent = '';
+  const fields = {};
+  const name = document.getElementById('p-name').value.trim();
+  if (name) fields.name = name;
+  const dob = document.getElementById('p-dob').value;
+  if (dob) fields.date_of_birth = dob;
+  const tob = document.getElementById('p-tob').value.trim();
+  if (tob) fields.time_of_birth = tob;
+  const bp = document.getElementById('p-bp').value.trim();
+  if (bp) fields.birth_place = bp;
+  const lang = document.getElementById('p-lang').value.trim();
+  if (lang) fields.preferred_language = lang;
+  if (!Object.keys(fields).length) {
+    msg.className = 'form-msg err';
+    msg.textContent = 'Fill in at least one field.';
+    return;
+  }
+  try {
+    const res = await fetch('/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: identity.user_id, ...fields }),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      msg.className = 'form-msg ok';
+      msg.textContent = 'Profile saved. Sun sign: ' + (data.sun_sign || '—');
+    } else {
+      msg.className = 'form-msg err';
+      msg.textContent = data.detail || 'Error saving profile.';
+    }
+  } catch (e) {
+    msg.className = 'form-msg err';
+    msg.textContent = 'Network error: ' + e.message;
+  }
+});
+
+// Stored data
+function cell(k, v) {
+  const missing = v == null || v === '';
+  return '<div class="cell"><span class="k">' + esc(k) + '</span><span class="v' + (missing ? ' missing' : '') + '">' + esc(missing ? '—' : v) + '</span></div>';
+}
+
+async function loadStored() {
+  storedContent.innerHTML = '<div class="empty-state"><span class="spinner"></span> Loading…</div>';
+  let profile = null;
+  let memories = [];
+  try {
+    const [pr, mr] = await Promise.all([
+      fetch('/users/' + encodeURIComponent(identity.user_id)),
+      fetch('/users/' + encodeURIComponent(identity.user_id) + '/memories'),
+    ]);
+    if (pr.ok) profile = await pr.json();
+    if (mr.ok) memories = await mr.json();
+  } catch (e) {
+    storedContent.innerHTML = '<div class="empty-state">Network error while loading stored data.</div>';
+    return;
+  }
+
+  const profileFields = profile
+    ? Object.values(profile).some(v => v != null && v !== '' && v !== identity.user_id)
+    : false;
+  const hasMemories = memories.length > 0;
+
+  if (!profileFields && !hasMemories) {
+    storedContent.innerHTML = '<div class="empty-state">Nothing stored yet — chat to tell AstroChat about yourself, or fill in your profile.</div>';
+    return;
+  }
+
+  let html = '';
+  if (profileFields) {
+    html += '<div><div class="section-title">Profile</div><div class="profile-card">';
+    html += cell('Name', profile.name);
+    html += cell('Language', profile.preferred_language);
+    html += cell('Sun sign', profile.sun_sign);
+    html += cell('Date of birth', profile.date_of_birth);
+    html += cell('Birth time', profile.time_of_birth);
+    html += cell('Birth place', profile.birth_place);
+    if (profile.sun_sign) html += '<div class="sun-sign">☉ ' + esc(profile.sun_sign) + '</div>';
+    html += '</div></div>';
+  }
+  if (hasMemories) {
+    html += '<div><div class="section-title">Memories</div>';
+    html += memories.map(m => `
+      <div class="memory-card">
+        <div class="key">${esc(m.key)}</div>
+        <div class="value">${esc(m.value)}</div>
+        <div class="sub">
+          <span>category: ${esc(m.category)}</span>
+          <span>type: ${esc(m.type)}</span>
+          <span>conf: ${(m.confidence * 100).toFixed(0)}%</span>
+          <span class="${m.status === 'ACTIVE' ? 'status-active' : 'status-superseded'}">${esc(m.status)}</span>
+        </div>
+      </div>
+    `).join('');
+    html += '</div>';
+  }
+  storedContent.innerHTML = html;
+}
+</script>
+</body>
+</html>

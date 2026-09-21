@@ -14,12 +14,16 @@ services:
   app:
     build: .
     ports: ["8000:8000"]
+    env_file: .env
     environment:
-      NEO4J_URI: bolt://neo4j:7687
-      NEO4J_USER: neo4j
-      NEO4J_PASSWORD: password
+      # .env wins; defaults target the bundled Compose Neo4j service. Set NEO4J_URI/USER/PASSWORD
+      # in .env (e.g. a Neo4j Aura cloud instance) to point the app at external Neo4j instead.
+      NEO4J_URI: ${NEO4J_URI:-bolt://neo4j:7687}
+      NEO4J_USER: ${NEO4J_USER:-neo4j}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-password}
       LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
       LLM_MODEL: ${LLM_MODEL:-}
+      LLM_CLASSIFY_MODEL: ${LLM_CLASSIFY_MODEL:-}   # cheaper router model; empty = use LLM_MODEL
       LLM_EFFORT: ${LLM_EFFORT:-medium}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       # For a server on the Docker host (e.g. Ollama) use http://host.docker.internal:11434/v1

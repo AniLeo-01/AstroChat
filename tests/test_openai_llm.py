@@ -9,13 +9,14 @@ import pytest
 
 from app.config import Settings
 from app.llm import AnthropicLLM, LLMError, MockLLM, OpenAICompatibleLLM, build_llm
-from app.models import ChatMessage, LLMRequest
+from app.models import Category, ChatMessage, LLMRequest
 
 
-def fake(handler, effort: str | None = "medium") -> OpenAICompatibleLLM:
+def fake(handler, effort: str | None = "medium", model: str = "local-model",
+         classify_model: str | None = None) -> OpenAICompatibleLLM:
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    return OpenAICompatibleLLM("local-model", base_url="http://fake/v1", api_key="k", effort=effort,
-                               http_client=client, max_retries=0)
+    return OpenAICompatibleLLM(model, base_url="http://fake/v1", api_key="k", effort=effort,
+                               classify_model=classify_model, http_client=client, max_retries=0)
 
 
 def completion(content: str | None) -> httpx.Response:
@@ -69,6 +70,40 @@ async def test_extract_requests_json_mode_and_tolerates_fences():
 async def test_extract_invalid_output_is_llm_error(content):
     with pytest.raises(LLMError):
         await fake(lambda req: completion(content)).extract_memories("x", date.today())
+
+
+async def test_classify_requests_json_and_parses_category():
+    def handler(req: httpx.Request) -> httpx.Response:
+        body = json.loads(req.content)
+        assert body["response_format"] == {"type": "json_object"} and body["reasoning_effort"] == "medium"
+        assert "follow_up" in body["messages"][0]["content"] and "astrology" in body["messages"][0]["content"]
+        return completion('{"category": "career"}')
+
+    assert await fake(handler).classify("I need job advice.") is Category.CAREER
+
+
+async def test_classify_uses_a_cheaper_model_than_generate():
+    seen = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append(json.loads(req.content)["model"])
+        return completion('{"category": "finance"}')
+
+    llm = fake(handler, classify_model="cheap-router")
+    await llm.classify("how is my 401k")
+    await llm.generate(LLMRequest("SYS", [ChatMessage("user", "hi")]))
+    assert seen == ["cheap-router", "local-model"]
+    assert llm._classify_model == "cheap-router"
+
+
+async def test_classify_falls_back_to_main_model_when_unset():
+    assert fake(lambda req: completion('{"category": "career"}'))._classify_model == "local-model"
+
+
+@pytest.mark.parametrize("content", ["not json", '{"category": "bogus"}', None])
+async def test_classify_invalid_output_is_llm_error(content):
+    with pytest.raises(LLMError):
+        await fake(lambda req: completion(content)).classify("hello")
 
 
 async def test_generate_empty_content_is_llm_error():

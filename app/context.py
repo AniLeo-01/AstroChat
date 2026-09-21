@@ -1,4 +1,10 @@
-"""Query understanding, context selection and prompt building (TDD §4.5 to §4.7)."""
+"""Query understanding, context selection and prompt building (TDD §4.5 to §4.7).
+
+classify() here is the deterministic rule reference for tests and for the mock provider (the in-process
+spec of the query taxonomy). The production ChatService routes through the LLM provider instead
+(see llm.CLASSIFY_SYSTEM + provider.classify), so phrasing that rules would misroute still lands
+in the right category. select_context() builds the bounded prompt shared by every provider.
+"""
 
 import re
 from dataclasses import dataclass
@@ -12,7 +18,7 @@ SYSTEM_PROMPT = """You are MyNaksh, a warm and personalized astrology assistant.
 - Keep answers conversational, specific and brief. Astrology is guidance, not certainty.
 - Do not mention memories, context, retrieval or how you know things; speak naturally."""
 
-# ponytail: keyword classifier, first match wins; swap for an LLM/embedding classifier when evals show misroutes.
+# Rule classifier: what the mock provider (and offline tests) use; production routes via the LLM (llm.py).
 _KEYWORDS: list[tuple[Category, re.Pattern]] = [
     (cat, re.compile(r"\b(?:" + "|".join(map(re.escape, words)) + ")", re.I))
     for cat, words in {
@@ -68,6 +74,10 @@ def select_context(
     profile: UserProfile | None, memories: list[Memory],
 ) -> Selection:
     """Bounded context: recent turns (already capped), relevant profile fields, retrieved memories."""
+    # Normalize: ensure recent conversation starts with user message (Anthropic rejects assistant-first prompts)
+    recent = list(recent)
+    if recent and recent[0].role == "assistant":
+        recent = [ChatMessage("user", "")] + recent
     wanted = _PROFILE_FIELDS_FOR.get(category, _DEFAULT_PROFILE_FIELDS)
     facts = {k: v for k, v in (profile.fields() if profile else {}).items() if k in wanted}
 

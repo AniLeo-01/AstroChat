@@ -5,6 +5,7 @@ import pytest
 from app.astrology import parse_date, sun_sign
 from app.brain import BrainUnavailable, InMemoryBrain, Neo4jBrain
 from app.context import classify
+from app.llm import LLMError, MockLLM
 from app.memory import validate
 from app.models import Category, MemoryCandidate
 
@@ -24,6 +25,15 @@ from app.models import Category, MemoryCandidate
 ])
 def test_classify(message, expected):
     assert classify(message) is expected
+
+
+async def test_mock_llm_classify_matches_rules_and_fails_when_failing():
+    llm = MockLLM()
+    assert await llm.classify("What should I focus on in my career?") is Category.CAREER
+    assert await llm.classify("Why do you say that?") is Category.FOLLOW_UP
+    llm.fail = True
+    with pytest.raises(LLMError, match="mock failure"):
+        await llm.classify("hi")
 
 
 @pytest.mark.parametrize("dob, sign", [
@@ -62,6 +72,19 @@ async def test_upsert_outcomes():
     assert [(m.value, m.source_message_id) for m in active] == [("Hindi", "m3")]
     assert sorted((m.value, m.status, m.confidence) for m in await brain.list_memories("u")) == [
         ("English", "SUPERSEDED", 0.95), ("Hindi", "ACTIVE", 0.8)]
+
+
+async def test_upsert_supports_n_successive_supersedes():
+    brain = InMemoryBrain()
+    c = MemoryCandidate(key="language.preferred", category="language", type="preference", value="v0", target_timeframe=None, confidence=0.8, reason="")
+    n = 50
+    for i in range(n):
+        outcome = await brain.upsert_memory("u", c.model_copy(update={"value": f"v{i}"}), f"m{i}")
+        assert outcome == ("created" if i == 0 else "updated")
+    rows = await brain.list_memories("u")
+    active = [m for m in rows if m.status == "ACTIVE"]
+    assert [m.value for m in active] == ["v49"]          # exactly one ACTIVE, the latest value
+    assert sum(m.status == "SUPERSEDED" for m in rows) == n - 1  # all prior versions kept, superseded
 
 
 async def test_upsert_profile_derives_sun_sign():

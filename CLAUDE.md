@@ -32,8 +32,8 @@ pytest config is in `pyproject.toml`: `asyncio_mode = "auto"` (async tests need 
 One module per concern, all in `app/`, dependency order: `config`, `models` → `session`, `astrology`, `brain` → `context` → `llm` → `memory` → `chat` → `main`.
 
 - `brain.py`: `SharedBrain` protocol, `InMemoryBrain` (tests, `BRAIN=memory`) and `Neo4jBrain` with all Cypher. The in-memory class is the readable spec for the Cypher; change both together and run `test_neo4j.py`.
-- `context.py`: `classify()` keyword classifier; `select_context()` builds the bounded `LLMRequest` and the `context_used` list.
-- `llm.py`: the only module that imports provider SDKs (`anthropic`, `openai`). `build_llm(settings)` selects the provider; `_guarded()` maps both SDKs' outage errors to `LLMError`. `MockLLM.extract_memories` is a regex extractor that covers the PRD example sentences.
+- `context.py`: `select_context()` builds the bounded `LLMRequest` and the `context_used` list. `classify()` is now only the deterministic rule reference that `MockLLM.classify` delegates to; **production query routing is the LLM** — `ChatService` calls `llm.classify()` (structured output, prompt `llm.CLASSIFY_SYSTEM`), so the live path is not regex-based.
+- `llm.py`: the only module that imports provider SDKs (`anthropic`, `openai`). `build_llm(settings)` selects the provider; `_guarded()` maps both SDKs' outage errors to `LLMError`. Each provider implements `generate`, `classify` (query router, structured output) and `extract_memories` (memory extraction). `MockLLM` delegates both `classify` and extraction to the deterministic rules.
 - `memory.py`: validate candidates, route profile keys to the Profile node, upsert the rest.
 - `chat.py`: `ChatService.chat()` orchestrates. It sees only `BrainUnavailable` and `LLMError`, never driver or SDK exceptions.
 - `main.py`: `create_app(brain=, llm=, settings=)` factory; tests inject fakes here. Routes only validate and delegate.

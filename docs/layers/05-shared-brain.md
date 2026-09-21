@@ -435,7 +435,7 @@ The one-warning rule from TDD §13.2 ("Skip the post-response memory write when 
 | Variable | Default | Effect on this layer |
 |---|---|---|
 | `BRAIN` | `neo4j` | `memory` selects `InMemoryBrain()`; any other value selects `Neo4jBrain` (no validation of the string) |
-| `NEO4J_URI` | `bolt://localhost:7687` | First argument to `Neo4jBrain`; `docker-compose.yml` sets `bolt://neo4j:7687` for the app container |
+| `NEO4J_URI` | `bolt://localhost:7687` | First argument to `Neo4jBrain`; `docker-compose.yml` applies `${NEO4J_URI:-bolt://neo4j:7687}` for the app container, so any `NEO4J_URI` in `.env` wins over the bundled compose service |
 | `NEO4J_USER` | `neo4j` | Auth principal |
 | `NEO4J_PASSWORD` | `password` | Auth credential; `docker-compose.yml` starts Neo4j with `NEO4J_AUTH: neo4j/password` to match |
 | `MEMORY_LIMIT` | `8` | Not read by this module, but it is the `limit` the orchestrator passes to `search_memories` |

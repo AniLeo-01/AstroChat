@@ -224,7 +224,7 @@ Every environment variable the repository reads, with the layer that consumes it
 | Variable | Default | Consumed by |
 |---|---|---|
 | `BRAIN` | `neo4j` | `lifespan` in `app/main.py`: `memory` selects `InMemoryBrain`, anything else selects `Neo4jBrain` |
-| `NEO4J_URI` | `bolt://localhost:7687` | `Neo4jBrain.__init__` via `app/main.py`; `docker-compose.yml` overrides it to `bolt://neo4j:7687` |
+| `NEO4J_URI` | `bolt://localhost:7687` | `Neo4jBrain.__init__` via `app/main.py`; `docker-compose.yml` runs `${NEO4J_URI:-bolt://neo4j:7687}` (`.env` wins, otherwise the compose service) |
 | `NEO4J_USER` | `neo4j` | `Neo4jBrain.__init__` via `app/main.py`; also read by `tests/test_neo4j.py` |
 | `NEO4J_PASSWORD` | `password` | `Neo4jBrain.__init__` via `app/main.py`; also read by `tests/test_neo4j.py` |
 | `LLM_PROVIDER` | `anthropic` | `build_llm` in `app/llm.py`: `anthropic`, `openai` or `mock`; anything else raises `ValueError` |
