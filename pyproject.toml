@@ -1,0 +1,20 @@
+[project]
+name = "astrochat"
+version = "0.1.0"
+description = "MyNaksh personalized astrology chat: FastAPI + Neo4j Shared Brain + pluggable LLM"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "neo4j>=5",
+    "anthropic",
+    "openai>=3.16.2",
+]
+
+[dependency-groups]
+dev = ["pytest", "pytest-asyncio", "httpx"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]
