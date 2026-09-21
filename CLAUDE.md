@@ -10,6 +10,8 @@ Spec lives in `docs/AstroChat_PRD.md` (requirements) and `docs/AstroChat_TDD.md`
 
 Every `POST /chat` follows: Chat → Context Selection → Shared Brain → LLM → Response → Memory Update.
 
+Layer-by-layer documentation lives in `docs/layers/` (start at `docs/layers/README.md`).
+
 ## Commands
 
 ```bash
